@@ -102,6 +102,7 @@ function copyDir(src, dest) {
   //   });
   // prepare to copy: remove old copy-dir, then call copyFiles function;
 
+  // It's promises hell too
   fs.promises
     .readdir(dest)
     .then(() => {
@@ -127,33 +128,26 @@ function copyDirChildren(src, dest) {
     .then(() => {
       // get all names for all files and dirs from src
       fs.promises
-        .readdir(src)
+        .readdir(src, { withFileTypes: true })
         .then((files) => {
           files.forEach((file) => {
-            const fromFileFullPath = path.join(src, file);
-            const toFileFullPath = path.join(dest, file);
+            const fromFileFullPath = path.join(src, file.name);
+            const toFileFullPath = path.join(dest, file.name);
 
-            // get info about each children from src
-            fs.promises
-              .stat(fromFileFullPath)
-              .then((stats) => {
-                // if it's a file => let's read it for copy
-                if (stats.isFile()) {
+            if (file.isFile()) {
+              fs.promises
+                .readFile(fromFileFullPath)
+                .then((data) => {
+                  // write to copy-file in dest
                   fs.promises
-                    .readFile(fromFileFullPath)
-                    .then((data) => {
-                      // write to copy-file in dest
-                      fs.promises
-                        .writeFile(toFileFullPath, data)
-                        .catch((e) => console.error(e));
-                    })
+                    .writeFile(toFileFullPath, data)
                     .catch((e) => console.error(e));
-                } else if (stats.isDirectory()) {
-                  // if it's directory => recursive call this func with new src & dest
-                  copyDirChildren(fromFileFullPath, toFileFullPath);
-                }
-              })
-              .catch((e) => console.error(e));
+                })
+                .catch((e) => console.error(e));
+            } else if (file.isDirectory()) {
+              // if it's directory => recursive call this func with new src & dest
+              copyDirChildren(fromFileFullPath, toFileFullPath);
+            }
           });
         })
         .catch((e) => console.error(e));
