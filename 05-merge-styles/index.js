@@ -3,33 +3,35 @@ const path = require('path');
 const prodStylesFile = path.join(__dirname, 'project-dist', 'bundle.css');
 const devStylesDir = path.join(__dirname, 'styles');
 
-// Let's try to read dev styles directory
-fs.promises
-  .readdir(devStylesDir, { withFileTypes: true })
-  .then((files) => {
-    // Only for '*.css' files let's try to read file & return promise
-    let styles = '';
-    files
-      .map((file, i) => {
-        if (!file.isFile() || path.parse(file.name).ext !== '.css') return;
+fs.readdir(devStylesDir, { withFileTypes: true }, (err, files) => {
+  if (err) return console.error(err);
 
-        // let's read files
-        return fs.promises.readFile(path.join(devStylesDir, file.name), 'utf8');
-      })
-      .filter((item) => item instanceof Promise)
-      .reduce(
-        (previousPromise, currentPromise) =>
-          previousPromise.then(() =>
-            currentPromise.then((data) => (styles += data))
-          ),
-        Promise.resolve()
-      )
-      .then(() => {
-        // we have to write bundle only after all readFile promises completed
-        // Let's write bundle
-        fs.promises
-          .writeFile(prodStylesFile, styles)
-          .catch((e) => console.error(e));
+  let styles = '';
+
+  // read files
+  files
+    .map((file, i) => {
+      // try to read only files .css
+      if (!file.isFile() || path.parse(file.name).ext !== '.css') return;
+
+      // let's read files
+      return fs.promises.readFile(path.join(devStylesDir, file.name), 'utf8');
+    })
+    .filter((item) => {
+      // save only promises
+      return item instanceof Promise;
+    })
+    .reduce((prev, cur) => {
+      return prev.then(() => {
+        // write data each promise step by step
+        return cur.then((data) => (styles += data));
       });
-  })
-  .catch((e) => console.error(e));
+    }, Promise.resolve())
+    .then(() => {
+      // we have to write bundle only after all readFile promises completed
+      // Let's write bundle
+      fs.writeFile(prodStylesFile, styles, (err, ok) => {
+        if (err) console.error('bundle write error');
+      });
+    });
+});
