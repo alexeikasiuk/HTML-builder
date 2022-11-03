@@ -1,20 +1,37 @@
 const fs = require('fs');
-const { stdin, stdout } = process;
+const { stdin, stdout, exit } = process;
 const path = require('path');
 const url = path.join(__dirname, 'text.txt');
 
-stdout.write('Hello!\nWrite a story:');
+// remove old version
+fs.writeFile(url, '', (err) => {
+  if (err) throw err;
 
-stdin.on('data', (chunk) => {
-  const str = chunk.toString().trim();
-
-  if (str === 'exit') {
-    process.exit();
-  } else if (str.length == 0) return;
-
-  fs.appendFile(url, str + '\n', () => {});
-  stdout.write('To exit type "exit" or press ctrl+c\nContinue: ');
+  // we are ready, start write mode
+  createWriteTerminal();
 });
 
-process.on('SIGINT', () => process.exit());
-process.on('exit', () => console.log('\nStory saved. Bye!!!'));
+function createWriteTerminal() {
+  stdout.write('Hello!\nTo exit type "exit" or press ctrl+c\nWrite a story: ');
+
+  stdin.on('data', (data) => {
+    const str = data.toString().trim();
+
+    if (str === 'exit') {
+      exit();
+    } else if (str.length == 0) {
+      //don't call fs.appendFile for input data
+      return;
+    }
+
+    //after "enter" write fragment to file
+    fs.appendFile(url, str + '\n', (err) => {
+      if (err) throw err;
+    });
+  });
+
+  process.on('exit', () => console.log('\nStory saved. Bye!!!'));
+
+  // catch ctr+c
+  process.on('SIGINT', () => process.exit());
+}
