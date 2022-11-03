@@ -4,27 +4,9 @@ const componentsPath = path.join(__dirname, 'components');
 const htmlTemplate = path.join(__dirname, 'template.html');
 const styles = path.join(__dirname, 'styles');
 const assets = path.join(__dirname, 'assets');
+const buildPath = path.join(__dirname, 'project-dist');
 
 function buildProject(dest) {
-  // check old version
-  fs.readdir(dest, (err) => {
-    if (err) {
-      // old version doesn't exist
-      // create directory for build & load project inside
-      createFiles(dest);
-    } else {
-      // remove old version if it exists
-      fs.rm(dest, { recursive: true }, (err) => {
-        if (err) return console.error(`Remove directory error`);
-
-        // create directory for build & load project inside
-        createFiles(dest);
-      });
-    }
-  });
-}
-
-function createFiles(dest) {
   fs.mkdir(dest, (err) => {
     if (err) return console.error(err);
 
@@ -35,7 +17,7 @@ function createFiles(dest) {
     createStylesFile(styles, dest);
 
     // copy assets
-    copyAssetsFiles(assets, path.join(dest, 'assets'));
+    copyDir(assets, path.join(dest, 'assets'));
   });
 }
 
@@ -44,45 +26,48 @@ function createHtmlFile(filePath, dest) {
   fs.readFile(filePath, 'utf8', (err, data) => {
     if (err) return console.error(err);
 
-    // inject components into a html-file & load it in build directory
-    loadParsedHtmlFile(data, dest);
+    //load components
+    fs.readdir(componentsPath, (err, componentsNames) => {
+      if (err) return console.error(err);
+
+      // inject components into a html-file & load it in build directory
+      parsedHtmlFile(data, dest, componentsNames);
+    });
   });
 }
 
-function loadParsedHtmlFile(html, dest) {
-  //get all components
-  fs.readdir(componentsPath, (err, componentsNames) => {
-    if (err) return console.error(err);
+function parsedHtmlFile(html, dest, files) {
+  //get all components code
+  const components = {};
 
-    const components = {};
-    componentsNames
-      .map((component) => {
-        return {
-          name: `{{${path.parse(component).name}}}`,
-          promise: fs.promises.readFile(
-            path.join(componentsPath, component),
-            'utf8'
-          ),
-        };
-      })
-      .reduce(
-        (prev, cur, i) =>
-          prev.then(() =>
-            cur.promise.then((data) => (components[cur.name] = data))
-          ),
-        Promise.resolve()
-      ) //now all components ig ready
-      .then(() => {
-        // inject components in html
-        for (const component in components) {
-          html = html.replace(component, components[component]);
-        }
-        // write parse html code
-        fs.writeFile(path.join(dest, 'index.html'), html, (err, ok) => {
-          if (err) console.error(err);
-        });
+  files
+    .map((component) => {
+      return {
+        name: `{{${path.parse(component).name}}}`,
+        promise: fs.promises.readFile(
+          path.join(componentsPath, component),
+          'utf8'
+        ),
+      };
+    })
+    .reduce(
+      (prev, cur, i) =>
+        prev.then(() =>
+          cur.promise.then((data) => (components[cur.name] = data))
+        ),
+      Promise.resolve()
+    )
+    .then(() => {
+      //now all components ig ready
+      // inject components in html
+      for (const component in components) {
+        html = html.replace(component, components[component]);
+      }
+      // write parsed html code
+      fs.writeFile(path.join(dest, 'index.html'), html, (err, ok) => {
+        if (err) console.error(err);
       });
-  });
+    });
 }
 
 // css
@@ -91,6 +76,7 @@ function createStylesFile(src, dest) {
   fs.readdir(src, (err, fileNames) => {
     if (err) return console.error(err);
 
+    // bug footer styles
     // temp - load css according html(header, then article, then footer styles)
     // only for this project
     // TODO: create correct css rules or universal load order
@@ -123,39 +109,46 @@ function createStylesFile(src, dest) {
   });
 }
 
-//assets directory
-function copyAssetsFiles(src, dest) {
+// assets
+// copy directory
+function copyDir(src, dest) {
   // create dest dir for copy
-  fs.promises
-    .mkdir(dest)
-    .then(() => {
-      // get all names for all files and dirs from src
-      fs.promises
-        .readdir(src, { withFileTypes: true })
-        .then((files) => {
-          files.forEach((file) => {
-            const fromFileFullPath = path.join(src, file.name);
-            const toFileFullPath = path.join(dest, file.name);
+  fs.mkdir(dest, (err) => {
+    if (err) throw err;
 
-            if (file.isFile()) {
-              fs.promises
-                .readFile(fromFileFullPath)
-                .then((data) => {
-                  // write to copy-file in dest
-                  fs.promises
-                    .writeFile(toFileFullPath, data)
-                    .catch((e) => console.error(`Write file error`));
-                })
-                .catch((e) => console.log(`Read file error`));
-            } else if (file.isDirectory()) {
-              // It's directory => recursive call this func with new src & dest
-              copyAssetsFiles(fromFileFullPath, toFileFullPath);
-            }
-          });
-        })
-        .catch((e) => console.log(`Read directory error`));
-    })
-    .catch((e) => console.log(`Create directory error`));
+    // get all names for all files and dirs from src
+    fs.readdir(src, { withFileTypes: true }, (err, files) => {
+      if (err) throw err;
+
+      // check type all files
+      files.forEach((file) => {
+        const from = path.join(src, file.name);
+        const to = path.join(dest, file.name);
+
+        if (file.isFile()) {
+          // create file copy
+          copyFile(from, to);
+        } else if (file.isDirectory()) {
+          // It's directory => recursive call this func with new src & dest
+          copyDir(from, to);
+        }
+      });
+    });
+  });
 }
 
-buildProject(path.join(__dirname, 'project-dist'));
+function copyFile(from, to) {
+  fs.readFile(from, (err, data) => {
+    if (err) throw err;
+    // write to copy-file in dest
+    fs.writeFile(to, data, (err) => {
+      if (err) throw err;
+    });
+  });
+}
+
+// remove old version if it exists
+fs.rm(buildPath, { recursive: true }, () => {
+  // create directory for build & load project inside
+  buildProject(buildPath);
+});
