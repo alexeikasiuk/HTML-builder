@@ -1,37 +1,33 @@
 const fs = require('fs');
-const { stdin, stdout, exit } = process;
 const path = require('path');
-const url = path.join(__dirname, 'text.txt');
+const rl = require('readline');
 
-// remove old version
-fs.writeFile(url, '', (err) => {
-  if (err) throw err;
+const filePath = path.join(__dirname, 'text.txt');
 
-  // we are ready, start write mode
-  createWriteTerminal();
+// I decided that script doesn't clear old data in file
+const writeStream = fs.createWriteStream(filePath, { flags: 'a' }, 'utf8');
+
+const readLine = rl.createInterface({
+  input: process.stdin,
+  stdout: process.stdout,
 });
 
-function createWriteTerminal() {
-  stdout.write('Hello!\nTo exit type "exit" or press ctrl+c\nWrite a story: ');
+readLine.on('line', (data) => {
+  // type 'exit' to cancel write mode
+  if (data.trim() === 'exit') process.exit();
 
-  stdin.on('data', (data) => {
-    const str = data.toString().trim();
+  writeStream.write(data + '\n');
+});
 
-    if (str === 'exit') {
-      exit();
-    } else if (str.length == 0) {
-      //don't call fs.appendFile for input data
-      return;
-    }
+process.on('exit', () => console.log('\nStory saved. Bye!!!'));
 
-    //after "enter" write fragment to file
-    fs.appendFile(url, str + '\n', (err) => {
-      if (err) throw err;
-    });
-  });
+// catch ctr+c
+process.on('SIGINT', () => process.exit());
 
-  process.on('exit', () => console.log('\nStory saved. Bye!!!'));
-
-  // catch ctr+c
-  process.on('SIGINT', () => process.exit());
-}
+// start write mode
+process.stdout.write(
+  `Hello!
+To exit type "exit" or press ctrl+c
+Write a story:
+`
+);

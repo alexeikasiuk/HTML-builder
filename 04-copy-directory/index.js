@@ -1,53 +1,42 @@
 const path = require('path');
-const fs = require('fs');
-const root = __dirname;
-const fromDir = path.join(root, 'files');
-const toDir = path.join(root, 'files-copy');
+const { readdir, mkdir, copyFile, rm } = require('fs/promises');
 
-function deepDirCopy(src, dest) {
-  // prepare to copy: remove old copy-dir, then call copyFiles function;
-  fs.rm(dest, { recursive: true }, () => {
-    // let's copy files
-    copyDirChildren(src, dest);
-  });
-}
-function copyDirChildren(src, dest) {
-  // create dest dir for copy
-  fs.mkdir(dest, (err) => {
-    if (err) return console.error(err);
+const src = path.join(__dirname, 'files');
+const dest = path.join(__dirname, 'files-copy');
 
-    readFromDir(src, dest);
-  });
-}
+const copyFiles = async (src, dest) => {
+  const files = await readdir(src, { withFileTypes: true });
 
-function readFromDir(src, dest) {
-  // get all names for all files and dirs from src
-  fs.readdir(src, { withFileTypes: true }, (err, files) => {
-    if (err) return console.error(err);
+  for (const file of files) {
+    const filePath = path.join(src, file.name);
+    const destPath = path.join(dest, file.name);
 
-    files.forEach((file) => {
-      const fromFile = path.join(src, file.name);
-      const toFile = path.join(dest, file.name);
+    if (file.isDirectory()) {
+      await doStuff(filePath, destPath);
+    } else {
+      await copyFile(filePath, destPath);
+    }
+  }
+};
 
-      if (file.isFile()) {
-        copyFile(fromFile, toFile);
-      } else if (file.isDirectory()) {
-        // if it's directory => recursive call this func with new src & dest
-        copyDirChildren(fromFile, toFile);
-      }
-    });
-  });
-}
+const clearFolder = async (dir) => {
+  const files = await readdir(dir);
 
-function copyFile(from, to) {
-  fs.readFile(from, (err, data) => {
-    if (err) return console.error(err);
+  for (const file of files) {
+    const filePath = path.join(dir, file);
 
-    // write to copy-file in dest
-    fs.writeFile(to, data, (err) => {
-      if (err) console.error(err);
-    });
-  });
-}
+    await rm(filePath, { recursive: true });
+  }
+};
 
-deepDirCopy(fromDir, toDir);
+const doStuff = async (src, dest) => {
+  try {
+    await clearFolder(dest);
+  } catch {
+    await mkdir(dest, { recursive: true });
+  } finally {
+    await copyFiles(src, dest);
+  }
+};
+
+doStuff(src, dest);

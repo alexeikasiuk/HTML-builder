@@ -1,37 +1,34 @@
 const fs = require('fs');
+const { readdir, rm } = require('fs/promises');
+const { pipeline } = require('stream/promises');
 const path = require('path');
-const prodStylesFile = path.join(__dirname, 'project-dist', 'bundle.css');
-const devStylesDir = path.join(__dirname, 'styles');
 
-fs.readdir(devStylesDir, { withFileTypes: true }, (err, files) => {
-  if (err) return console.error(err);
+const bundle = path.join(__dirname, 'project-dist', 'bundle.css');
+const src = path.join(__dirname, 'styles');
 
-  let styles = '';
+const mergeFiles = async (filePathArray) => {
+  for (const filePath of filePathArray) {
+    const readStream = fs.createReadStream(filePath, 'utf8');
+    const writeStream = fs.createWriteStream(bundle, { flags: 'a' }, 'utf8');
 
-  // read files
-  files
-    .map((file, i) => {
-      // try to read only files .css
-      if (!file.isFile() || path.parse(file.name).ext !== '.css') return;
+    await pipeline(readStream, writeStream);
+  }
+};
+const createBundle = async () => {
+  const files = await readdir(src, { withFileTypes: true });
 
-      // let's read files
-      return fs.promises.readFile(path.join(devStylesDir, file.name), 'utf8');
-    })
-    .filter((item) => {
-      // save only promises
-      return item instanceof Promise;
-    })
-    .reduce((prev, cur) => {
-      return prev.then(() => {
-        // write data each promise step by step
-        return cur.then((data) => (styles += data));
-      });
-    }, Promise.resolve())
-    .then(() => {
-      // we have to write bundle only after all readFile promises completed
-      // Let's write bundle
-      fs.writeFile(prodStylesFile, styles, (err, ok) => {
-        if (err) console.error('bundle write error');
-      });
-    });
-});
+  const filePaths = files
+    .filter((file) => !file.isDirectory() && path.extname(file.name) === '.css')
+    .map((fileName) => path.join(src, fileName.name));
+
+  try {
+    // temp: delete old version bundle
+    await rm(bundle);
+  } catch (e) {
+    // file doesn't exist
+  } finally {
+    mergeFiles(filePaths);
+  }
+};
+
+createBundle();

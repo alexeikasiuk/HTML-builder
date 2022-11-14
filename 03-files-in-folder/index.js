@@ -1,35 +1,36 @@
 const path = require('path');
-const fs = require('fs');
-const root = path.join(__dirname, 'secret-folder');
+const { readdir, stat } = require('fs/promises');
 
-function showFileInfo(stats, file) {
-  // print info only for files 1st level w/o files in subdirectory
-  if (stats.isFile()) {
-    file = file.split('.');
+const dirPath = path.join(__dirname, 'secret-folder');
+const BYTES_IN_KB = 1024;
 
-    //for example, if file name is "abc.def.js"
-    const name = file.slice(0, file.length - 1).join('.');
-    const ext = file[file.length - 1];
+const getFilesInfo = async (dirPath) => {
+  const files = await readdir(dirPath, { withFileTypes: true });
 
-    console.log(`${name} - ${ext} - ${stats.size}b`);
-  }
-}
+  const tableData = await Promise.all(
+    files.map(async (file) => {
+      if (file.isDirectory()) return null;
 
-function getFilesInfo(files) {
-  files.forEach((file) => {
-    const url = path.join(root, file);
+      const filePath = path.join(dirPath, file.name);
+      const fileExtension = path.extname(file.name);
 
-    //get info about file size
-    fs.stat(url, (err, stats) => {
-      if (err) throw err;
+      const fileStats = await stat(filePath);
 
-      // parse & print to console
-      showFileInfo(stats, file);
-    });
-  });
-}
+      const name = path.basename(filePath, fileExtension);
+      const extension = fileExtension.slice(1);
+      const sizeKb = `${Math.round(fileStats.size / BYTES_IN_KB)} kb`;
 
-fs.readdir(root, (err, files) => {
-  if (err) throw err;
-  getFilesInfo(files);
-});
+      return {
+        name,
+        extension,
+        size: sizeKb,
+      };
+    })
+  );
+
+  const existingValues = tableData.filter(Boolean);
+
+  console.table(existingValues);
+};
+
+getFilesInfo(dirPath);

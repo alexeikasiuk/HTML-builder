@@ -1,154 +1,102 @@
 const fs = require('fs');
+const { pipeline } = require('stream/promises');
 const path = require('path');
-const componentsPath = path.join(__dirname, 'components');
-const htmlTemplate = path.join(__dirname, 'template.html');
+const {
+  rm,
+  mkdir,
+  readFile,
+  readdir,
+  writeFile,
+  copyFile,
+} = require('fs/promises');
+
+const components = path.join(__dirname, 'components');
+const template = path.join(__dirname, 'template.html');
 const styles = path.join(__dirname, 'styles');
 const assets = path.join(__dirname, 'assets');
-const buildPath = path.join(__dirname, 'project-dist');
-
-function buildProject(dest) {
-  fs.mkdir(dest, (err) => {
-    if (err) return console.error(err);
-
-    //prepare and load html file
-    createHtmlFile(htmlTemplate, dest);
-
-    // prepare and load styles
-    createStylesFile(styles, dest);
-
-    // copy assets
-    copyDir(assets, path.join(dest, 'assets'));
-  });
-}
+const dest = path.join(__dirname, 'project-dist');
+const htmlBundle = path.join(dest, 'index.html');
+const cssBundle = path.join(dest, 'style.css');
+const assetsBundle = path.join(dest, 'assets');
+let html = '';
 
 // html
-function createHtmlFile(filePath, dest) {
-  fs.readFile(filePath, 'utf8', (err, data) => {
-    if (err) return console.error(err);
+const createHtmlBundle = async (src, dest) => {
+  // save the template as a string for injection components
+  html = await readFile(src, 'utf8');
 
-    //load components
-    fs.readdir(componentsPath, (err, componentsNames) => {
-      if (err) return console.error(err);
+  //load components
+  const files = await readdir(components);
 
-      // inject components into a html-file & load it in build directory
-      parsedHtmlFile(data, dest, componentsNames);
-    });
-  });
-}
+  // inject components into a html-file & load it in build directory
+  await Promise.all(
+    files.map(async (file) => {
+      const componentPath = path.join(components, file);
+      const ext = path.extname(file);
+      const name = `{{${path.basename(file, ext)}}}`;
 
-function parsedHtmlFile(html, dest, files) {
-  //get all components code
-  const components = {};
+      const component = await readFile(componentPath);
 
-  files
-    .map((component) => {
-      return {
-        name: `{{${path.parse(component).name}}}`,
-        promise: fs.promises.readFile(
-          path.join(componentsPath, component),
-          'utf8'
-        ),
-      };
+      html = html.replace(name, component);
     })
-    .reduce(
-      (prev, cur, i) =>
-        prev.then(() =>
-          cur.promise.then((data) => (components[cur.name] = data))
-        ),
-      Promise.resolve()
-    )
-    .then(() => {
-      //now all components ig ready
-      // inject components in html
-      for (const component in components) {
-        html = html.replace(component, components[component]);
-      }
-      // write parsed html code
-      fs.writeFile(path.join(dest, 'index.html'), html, (err, ok) => {
-        if (err) console.error(err);
-      });
-    });
-}
+  );
+
+  // write html bundle
+  writeFile(htmlBundle, html);
+};
 
 // css
-function createStylesFile(src, dest) {
-  //get all style-file names
-  fs.readdir(src, (err, fileNames) => {
-    if (err) return console.error(err);
+const createStylesBundle = async (src, dest) => {
+  const files = await readdir(src, { withFileTypes: true });
 
-    // bug footer styles
-    // temp - load css according html(header, then article, then footer styles)
-    // only for this project
-    // TODO: create correct css rules or universal load order
-    fileNames.sort((a, b) => {
-      const nameA = a.split('.')[0],
-        nameB = b.split('.')[0];
+  // get all style filePaths for merge
+  const filePaths = files
+    .filter((file) => !file.isDirectory() && path.extname(file.name) === '.css')
+    .map((fileName) => path.join(src, fileName.name));
 
-      if (nameA == 'header' || nameB == 'footer') return -1;
-      if (nameA != 'header' || nameB != 'footer') return 1;
-      return 0;
-    });
+  // write styles bundle
+  for (const filePath of filePaths) {
+    const readStream = fs.createReadStream(filePath, 'utf8');
+    const writeStream = fs.createWriteStream(cssBundle, { flags: 'a' }, 'utf8');
 
-    let cssCode = '';
-    //read all css files and put data in cssCode
-    fileNames
-      .map((fileName) => fs.promises.readFile(path.join(src, fileName)))
-      .reduce((prev, cur) => {
-        return prev.then(() => {
-          return cur.then((data) => {
-            cssCode += data;
-          });
-        });
-      }, Promise.resolve())
-      .then(() => {
-        // now all styles is prepared to write
-        fs.writeFile(path.join(dest, 'style.css'), cssCode, (err) => {
-          if (err) console.error(err);
-        });
-      });
-  });
-}
+    await pipeline(readStream, writeStream);
+  }
+};
 
 // assets
-// copy directory
-function copyDir(src, dest) {
-  // create dest dir for copy
-  fs.mkdir(dest, (err) => {
-    if (err) throw err;
+const copyFiles = async (src, dest) => {
+  const files = await readdir(src, { withFileTypes: true });
+  await mkdir(dest, { recursive: true });
 
-    // get all names for all files and dirs from src
-    fs.readdir(src, { withFileTypes: true }, (err, files) => {
-      if (err) throw err;
+  for (const file of files) {
+    const from = path.join(src, file.name);
+    const to = path.join(dest, file.name);
 
-      // check type all files
-      files.forEach((file) => {
-        const from = path.join(src, file.name);
-        const to = path.join(dest, file.name);
+    if (file.isDirectory()) {
+      copyFiles(from, to);
+    } else {
+      copyFile(from, to);
+    }
+  }
+};
 
-        if (file.isFile()) {
-          // create file copy
-          copyFile(from, to);
-        } else if (file.isDirectory()) {
-          // It's directory => recursive call this func with new src & dest
-          copyDir(from, to);
-        }
-      });
-    });
-  });
-}
+const buildProject = async (dest) => {
+  // remove old version if it exists
+  try {
+    await rm(dest, { recursive: true });
+  } catch (e) {
+  } finally {
+    await mkdir(dest);
+  }
 
-function copyFile(from, to) {
-  fs.readFile(from, (err, data) => {
-    if (err) throw err;
-    // write to copy-file in dest
-    fs.writeFile(to, data, (err) => {
-      if (err) throw err;
-    });
-  });
-}
+  //prepare and load html file
+  createHtmlBundle(template, dest);
 
-// remove old version if it exists
-fs.rm(buildPath, { recursive: true }, () => {
-  // create directory for build & load project inside
-  buildProject(buildPath);
-});
+  // prepare and load styles
+  createStylesBundle(styles, dest);
+
+  // copy assets
+  copyFiles(assets, assetsBundle);
+};
+
+buildProject(dest);
